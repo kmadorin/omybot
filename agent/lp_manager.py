@@ -448,18 +448,26 @@ class LPManager:
     # Position persistence (JSON file)
     # ------------------------------------------------------------------
 
-    def save_position(self, token_id: int, tick_lower: int, tick_upper: int):
+    def save_position(
+        self,
+        token_id: int,
+        tick_lower: int,
+        tick_upper: int,
+        entry_price: float | None = None,
+    ):
         """Append a position record to positions.json."""
         positions = self.load_positions()
 
-        positions.append(
-            {
-                "token_id": token_id,
-                "tick_lower": tick_lower,
-                "tick_upper": tick_upper,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        record = {
+            "token_id": token_id,
+            "tick_lower": tick_lower,
+            "tick_upper": tick_upper,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if entry_price is not None:
+            record["entry_price"] = float(entry_price)
+
+        positions.append(record)
 
         with open(POSITIONS_FILE, "w") as f:
             json.dump(positions, f, indent=2)
