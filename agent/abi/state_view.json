@@ -1,0 +1,58 @@
+[
+  {
+    "type": "function",
+    "name": "getSlot0",
+    "inputs": [
+      { "name": "poolId", "type": "bytes32" }
+    ],
+    "outputs": [
+      { "name": "sqrtPriceX96", "type": "uint160" },
+      { "name": "tick", "type": "int24" },
+      { "name": "protocolFee", "type": "uint24" },
+      { "name": "lpFee", "type": "uint24" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getLiquidity",
+    "inputs": [
+      { "name": "poolId", "type": "bytes32" }
+    ],
+    "outputs": [
+      { "name": "liquidity", "type": "uint128" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPositionInfo",
+    "inputs": [
+      { "name": "poolId", "type": "bytes32" },
+      { "name": "owner", "type": "address" },
+      { "name": "tickLower", "type": "int24" },
+      { "name": "tickUpper", "type": "int24" },
+      { "name": "salt", "type": "bytes32" }
+    ],
+    "outputs": [
+      { "name": "liquidity", "type": "uint128" },
+      { "name": "feeGrowthInside0LastX128", "type": "uint256" },
+      { "name": "feeGrowthInside1LastX128", "type": "uint256" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getFeeGrowthInside",
+    "inputs": [
+      { "name": "poolId", "type": "bytes32" },
+      { "name": "tickLower", "type": "int24" },
+      { "name": "tickUpper", "type": "int24" }
+    ],
+    "outputs": [
+      { "name": "feeGrowthInside0X128", "type": "uint256" },
+      { "name": "feeGrowthInside1X128", "type": "uint256" }
+    ],
+    "stateMutability": "view"
+  }
+]

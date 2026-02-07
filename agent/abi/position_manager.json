@@ -1,0 +1,74 @@
+[
+  {
+    "type": "function",
+    "name": "modifyLiquidities",
+    "inputs": [
+      { "name": "unlockData", "type": "bytes" },
+      { "name": "deadline", "type": "uint256" }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "modifyLiquiditiesWithoutUnlock",
+    "inputs": [
+      { "name": "actions", "type": "bytes" },
+      { "name": "params", "type": "bytes[]" }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "getPositionLiquidity",
+    "inputs": [
+      { "name": "tokenId", "type": "uint256" }
+    ],
+    "outputs": [
+      { "name": "liquidity", "type": "uint128" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "nextTokenId",
+    "inputs": [],
+    "outputs": [
+      { "name": "", "type": "uint256" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ownerOf",
+    "inputs": [
+      { "name": "id", "type": "uint256" }
+    ],
+    "outputs": [
+      { "name": "owner", "type": "address" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "balanceOf",
+    "inputs": [
+      { "name": "owner", "type": "address" }
+    ],
+    "outputs": [
+      { "name": "", "type": "uint256" }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "Transfer",
+    "inputs": [
+      { "name": "from", "type": "address", "indexed": true },
+      { "name": "to", "type": "address", "indexed": true },
+      { "name": "id", "type": "uint256", "indexed": true }
+    ],
+    "anonymous": false
+  }
+]
