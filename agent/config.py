@@ -48,3 +48,38 @@ SWEEP = 0x14
 START_BLOCK = 25350999
 BATCH_SIZE = 200
 BASE_BLOCK_TIME = 2
+
+
+def build_pool_key():
+    from eth_utils import to_checksum_address
+
+    currency0 = to_checksum_address(ETH_ADDRESS)
+    currency1 = to_checksum_address(USDC_ADDRESS)
+    if int(currency0, 16) > int(currency1, 16):
+        currency0, currency1 = currency1, currency0
+
+    return {
+        "currency0": currency0,
+        "currency1": currency1,
+        "fee": POOL_FEE,
+        "tick_spacing": TICK_SPACING,
+        "hooks": to_checksum_address(HOOKS_ADDRESS),
+    }
+
+
+def compute_pool_id():
+    from eth_abi import encode
+    from eth_utils import keccak
+
+    pool_key = build_pool_key()
+    pool_key_encoded = encode(
+        ["address", "address", "uint24", "int24", "address"],
+        [
+            pool_key["currency0"],
+            pool_key["currency1"],
+            pool_key["fee"],
+            pool_key["tick_spacing"],
+            pool_key["hooks"],
+        ],
+    )
+    return "0x" + keccak(pool_key_encoded).hex()

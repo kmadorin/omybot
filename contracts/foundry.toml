@@ -15,4 +15,4 @@ remappings = [
 base = "https://mainnet.base.org"
 
 [profile.fork]
-fork_url = "https://mainnet.base.org"
+eth_rpc_url = "https://mainnet.base.org"
