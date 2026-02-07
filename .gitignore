@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+.venv/
+ml/data/raw/
+ml/data/processed/
+ml/logs/
+ml/models/

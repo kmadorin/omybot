@@ -246,6 +246,45 @@ class LPManager:
         return {"tx_hash": receipt["transactionHash"].hex()}
 
     # ------------------------------------------------------------------
+    # Decrease liquidity (withdraw to wallet)
+    # ------------------------------------------------------------------
+
+    def decrease_liquidity(self, token_id: int, liquidity: int, deadline: int) -> dict:
+        """Remove liquidity from a position and withdraw tokens to wallet.
+
+        Actions: [DECREASE_LIQUIDITY, CLOSE_CURRENCY, CLOSE_CURRENCY, SWEEP]
+
+        Returns {"tx_hash": str}.
+        """
+        cfg = self.config
+
+        decrease_params = abi_encode(
+            ["uint256", "uint256", "uint128", "uint128", "bytes"],
+            [token_id, liquidity, 0, 0, b""],
+        )
+
+        close_c0 = abi_encode(["address"], [to_checksum_address(cfg.ETH_ADDRESS)])
+        close_c1 = abi_encode(["address"], [to_checksum_address(cfg.USDC_ADDRESS)])
+
+        sweep = abi_encode(
+            ["address", "address"],
+            [to_checksum_address(cfg.ETH_ADDRESS), self.account.address],
+        )
+
+        actions = bytes(
+            [cfg.DECREASE_LIQUIDITY, cfg.CLOSE_CURRENCY, cfg.CLOSE_CURRENCY, cfg.SWEEP]
+        )
+        params = [decrease_params, close_c0, close_c1, sweep]
+
+        receipt = self._send_modify_liquidities(actions, params, deadline)
+        logger.info(
+            "Decreased liquidity for token_id=%d tx=%s",
+            token_id,
+            receipt["transactionHash"].hex(),
+        )
+        return {"tx_hash": receipt["transactionHash"].hex()}
+
+    # ------------------------------------------------------------------
     # Rebalance (atomic: remove old + mint new)
     # ------------------------------------------------------------------
 
