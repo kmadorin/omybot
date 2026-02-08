@@ -25,7 +25,9 @@ import config
 # Logging setup
 # ---------------------------------------------------------------------------
 LOG_DIR = os.path.dirname(__file__)
-DECISIONS_LOG = os.path.join(LOG_DIR, "decisions.log")
+DECISIONS_DIR = os.path.join(LOG_DIR, "decisions")
+os.makedirs(DECISIONS_DIR, exist_ok=True)
+DECISIONS_LOG = os.path.join(DECISIONS_DIR, "decisions.log")
 
 logger = logging.getLogger("omybot.agent")
 logger.setLevel(logging.DEBUG)
@@ -158,7 +160,7 @@ class LPAgent:
             self.position_entry_prices[token_id] = entry_price
 
         if updated:
-            positions_file = os.path.join(os.path.dirname(__file__), "positions.json")
+            positions_file = os.path.join(os.path.dirname(__file__), "positions", "positions.json")
             with open(positions_file, "w") as f:
                 json.dump(self.positions, f, indent=2)
             logger.info("Backfilled missing entry_price for legacy positions")
@@ -540,7 +542,7 @@ class LPAgent:
                 p for p in self.lp_manager.load_positions() if p["token_id"] != token_id
             ]
             # Re-save without the old one
-            positions_file = os.path.join(os.path.dirname(__file__), "positions.json")
+            positions_file = os.path.join(os.path.dirname(__file__), "positions", "positions.json")
             with open(positions_file, "w") as f:
                 json.dump(self.positions, f, indent=2)
 

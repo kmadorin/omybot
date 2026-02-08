@@ -22,7 +22,9 @@ def _load_abi(filename: str) -> list:
         return json.load(f)
 
 
-POSITIONS_FILE = os.path.join(os.path.dirname(__file__), "positions.json")
+POSITIONS_DIR = os.path.join(os.path.dirname(__file__), "positions")
+os.makedirs(POSITIONS_DIR, exist_ok=True)
+POSITIONS_FILE = os.path.join(POSITIONS_DIR, "positions.json")
 
 # Max uint values used in approvals
 MAX_UINT256 = 2**256 - 1
@@ -225,12 +227,13 @@ class LPManager:
             [token_id, 0, 0, 0, b""],
         )
 
-        # TAKE_PAIR params: (address currency0, address currency1)
+        # TAKE_PAIR params: (address currency0, address currency1, address recipient)
         take_params = abi_encode(
-            ["address", "address"],
+            ["address", "address", "address"],
             [
                 to_checksum_address(cfg.ETH_ADDRESS),
                 to_checksum_address(cfg.USDC_ADDRESS),
+                self.account.address,
             ],
         )
 

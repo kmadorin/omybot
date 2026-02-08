@@ -6,12 +6,29 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+ANVIL_MNEMONIC = "test test test test test test test test test test test junk"
+
+
+def _load_dotenv(path: Path) -> dict[str, str]:
+    """Minimal .env parser — no external deps needed."""
+    env = {}
+    if not path.exists():
+        return env
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        env[key.strip()] = value.strip()
+    return env
 
 
 @dataclass
@@ -28,12 +45,12 @@ class E2ERunner:
         self.logs_dir = self.root / "logs"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
-        self.anvil_log = self.logs_dir / "step6_anvil.log"
-        self.agent_stdout_log = self.logs_dir / "step6_agent_stdout.log"
-        self.swap_log = self.logs_dir / "step6_swap_simulation.log"
+        self.anvil_log = self.logs_dir / "e2e_anvil.log"
+        self.agent_stdout_log = self.logs_dir / "e2e_agent_stdout.log"
+        self.swap_log = self.logs_dir / "e2e_swap_simulation.log"
 
-        self.positions_file = self.agent_dir / "positions.json"
-        self.decisions_log = self.agent_dir / "decisions.log"
+        self.positions_file = self.agent_dir / "positions" / "positions.json"
+        self.decisions_log = self.agent_dir / "decisions" / "decisions.log"
 
         self.procs: list[Proc] = []
 
@@ -75,7 +92,7 @@ class E2ERunner:
         if test.returncode == 0:
             return
 
-        print("[step6] installing python deps from agent/requirements.txt", flush=True)
+        print("[e2e] installing python deps from agent/requirements.txt", flush=True)
         subprocess.run(
             [python_bin, "-m", "pip", "install", "-r", str(self.agent_dir / "requirements.txt")],
             check=True,
@@ -86,7 +103,7 @@ class E2ERunner:
             if path.exists():
                 path.unlink()
 
-        print(f"[step6] starting anvil fork: {self.args.fork_url}", flush=True)
+        print(f"[e2e] starting anvil fork: {self.args.fork_url}", flush=True)
         anvil_log_f = self.anvil_log.open("w")
         proc = subprocess.Popen(
             [
@@ -97,6 +114,9 @@ class E2ERunner:
                 str(self.args.chain_id),
                 "--block-time",
                 str(self.args.block_time),
+                "--auto-impersonate",
+                "--mnemonic",
+                ANVIL_MNEMONIC,
             ],
             stdout=anvil_log_f,
             stderr=subprocess.STDOUT,
@@ -106,7 +126,7 @@ class E2ERunner:
 
         for _ in range(45):
             if self._cast(["block-number"]).returncode == 0:
-                print("[step6] anvil is ready", flush=True)
+                print("[e2e] anvil is ready", flush=True)
                 return
             time.sleep(1)
 
@@ -154,12 +174,12 @@ class E2ERunner:
         )
 
     def _fund_accounts(self) -> None:
-        print("[step6] funding agent and swap accounts with USDC", flush=True)
+        print(f"[e2e] funding agent ({self.args.agent_addr}) and swap ({self.args.swap_addr}) with USDC", flush=True)
         self._cast_send_transfer(self.args.agent_addr, self.args.agent_usdc_raw)
         self._cast_send_transfer(self.args.swap_addr, self.args.swap_usdc_raw)
 
     def _start_agent(self, python_bin: str) -> None:
-        print("[step6] starting agent", flush=True)
+        print("[e2e] starting agent", flush=True)
         agent_log_f = self.agent_stdout_log.open("w")
         proc = subprocess.Popen(
             [python_bin, "agent.py", self.args.agent_pk],
@@ -182,7 +202,7 @@ class E2ERunner:
         raise RuntimeError(f"agent did not reach running state in time\n{tail}")
 
     def _run_swap_simulation(self, python_bin: str) -> None:
-        print("[step6] running swap simulation", flush=True)
+        print("[e2e] running swap simulation", flush=True)
         with self.swap_log.open("w") as f:
             subprocess.run(
                 [
@@ -208,7 +228,7 @@ class E2ERunner:
             )
 
     def _verify(self) -> int:
-        print("[step6] verification checklist", flush=True)
+        print("[e2e] verification checklist", flush=True)
 
         checks = [
             (
@@ -244,21 +264,21 @@ class E2ERunner:
             all_passed = all_passed and ok
 
         if not all_passed:
-            print("[step6] one or more checks failed", flush=True)
-            print("[step6] last agent logs:", flush=True)
+            print("[e2e] one or more checks failed", flush=True)
+            print("[e2e] last agent logs:", flush=True)
             print(self._tail(self.agent_stdout_log, 80), flush=True)
-            print("[step6] last swap logs:", flush=True)
+            print("[e2e] last swap logs:", flush=True)
             print(self._tail(self.swap_log, 80), flush=True)
             return 1
 
-        print("[step6] all checks passed", flush=True)
-        print("[step6] logs:", flush=True)
+        print("[e2e] all checks passed", flush=True)
+        print("[e2e] logs:", flush=True)
         print(f"  anvil: {self.anvil_log}", flush=True)
         print(f"  agent: {self.agent_stdout_log}", flush=True)
         print(f"  swaps: {self.swap_log}", flush=True)
         print(f"  decisions: {self.decisions_log}", flush=True)
         if self.args.keep_running:
-            print("[step6] keep-running enabled, anvil+agent are still running", flush=True)
+            print("[e2e] keep-running enabled, anvil+agent are still running", flush=True)
 
         return 0
 
@@ -290,36 +310,21 @@ class E2ERunner:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Step 6 E2E on local Base fork")
+    parser = argparse.ArgumentParser(description="Run E2E on local Base fork")
+
+    # Load agent/.env for default keys/addresses
+    agent_dir = Path(__file__).resolve().parent / "agent"
+    dotenv = _load_dotenv(agent_dir / ".env")
 
     parser.add_argument("--rpc-url", default=os.getenv("ANVIL_RPC_URL", "http://localhost:8545"))
     parser.add_argument("--fork-url", default=os.getenv("FORK_URL", "https://mainnet.base.org"))
     parser.add_argument("--chain-id", type=int, default=int(os.getenv("CHAIN_ID", "8453")))
     parser.add_argument("--block-time", type=int, default=int(os.getenv("BLOCK_TIME", "2")))
 
-    parser.add_argument(
-        "--agent-pk",
-        default=os.getenv(
-            "AGENT_PK",
-            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-        ),
-    )
-    parser.add_argument(
-        "--swap-pk",
-        default=os.getenv(
-            "SWAP_PK",
-            "0x59c6995e998f97a5a0044966f094538e5b0d2cefe4f7fcca7e5fca9c7e5e5fbb",
-        ),
-    )
-
-    parser.add_argument(
-        "--agent-addr",
-        default=os.getenv("AGENT_ADDR", "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"),
-    )
-    parser.add_argument(
-        "--swap-addr",
-        default=os.getenv("SWAP_ADDR", "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"),
-    )
+    parser.add_argument("--agent-pk", default=os.getenv("AGENT_PK", dotenv.get("AGENT_PK", "")))
+    parser.add_argument("--swap-pk", default=os.getenv("SWAP_PK", dotenv.get("SWAP_PK", "")))
+    parser.add_argument("--agent-addr", default=os.getenv("AGENT_ADDR", dotenv.get("AGENT_ADDR", "")))
+    parser.add_argument("--swap-addr", default=os.getenv("SWAP_ADDR", dotenv.get("SWAP_ADDR", "")))
     parser.add_argument(
         "--usdc",
         default=os.getenv("USDC", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
@@ -334,8 +339,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--swap-cycles", type=int, default=int(os.getenv("SWAP_CYCLES", "6")))
     parser.add_argument("--swap-interval", type=int, default=int(os.getenv("SWAP_INTERVAL", "20")))
-    parser.add_argument("--swap-eth-in", type=float, default=float(os.getenv("SWAP_ETH_IN", "3.0")))
-    parser.add_argument("--swap-usdc-in", type=float, default=float(os.getenv("SWAP_USDC_IN", "6000.0")))
+    parser.add_argument("--swap-eth-in", type=float, default=float(os.getenv("SWAP_ETH_IN", "20.0")))
+    parser.add_argument("--swap-usdc-in", type=float, default=float(os.getenv("SWAP_USDC_IN", "40000.0")))
 
     parser.add_argument("--post-swap-wait", type=int, default=int(os.getenv("POST_SWAP_WAIT", "20")))
     parser.add_argument("--keep-running", action="store_true", default=os.getenv("KEEP_RUNNING", "0") == "1")
@@ -349,10 +354,10 @@ def main() -> int:
     try:
         return runner.run()
     except KeyboardInterrupt:
-        print("\n[step6] interrupted", flush=True)
+        print("\n[e2e] interrupted", flush=True)
         return 130
     except Exception as exc:
-        print(f"[step6] failed: {exc}", flush=True)
+        print(f"[e2e] failed: {exc}", flush=True)
         return 1
 
 

@@ -17,9 +17,6 @@ import config
 
 getcontext().prec = 40
 
-ANVIL_ACCOUNT_1_PRIVATE_KEY = (
-    "0x59c6995e998f97a5a0044966f094538e5b0d2cefe4f7fcca7e5fca9c7e5e5fbb"
-)
 
 SWAP_EXACT_IN_SINGLE = 0x06
 SETTLE_ALL = 0x0C
@@ -245,7 +242,7 @@ class SwapSimulator:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Simulate alternating ETH/USDC swaps on Anvil fork")
     parser.add_argument("--rpc-url", default=config.LOCAL_RPC_URL, help="RPC URL (default: localhost anvil)")
-    parser.add_argument("--private-key", default=ANVIL_ACCOUNT_1_PRIVATE_KEY, help="Private key for swap sender")
+    parser.add_argument("--private-key", required=True, help="Private key for swap sender")
     parser.add_argument("--cycles", type=int, default=6, help="Number of alternating swap cycles")
     parser.add_argument("--interval", type=int, default=30, help="Seconds between swaps")
     parser.add_argument("--eth-in", type=float, default=3.0, help="ETH amount per ETH->USDC swap")

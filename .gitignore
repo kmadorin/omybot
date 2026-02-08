@@ -5,3 +5,8 @@ ml/data/raw/
 ml/data/processed/
 ml/logs/
 ml/models/
+logs/
+e2e_run.log
+agent/decisions/
+agent/positions/
+agent/.env
