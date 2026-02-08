@@ -10,3 +10,4 @@ e2e_run.log
 agent/decisions/
 agent/positions/
 agent/.env
+dashboard/price_history.json

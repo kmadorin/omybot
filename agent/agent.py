@@ -11,6 +11,7 @@ import os
 import sys
 import time
 from collections import deque
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -28,6 +29,7 @@ LOG_DIR = os.path.dirname(__file__)
 DECISIONS_DIR = os.path.join(LOG_DIR, "decisions")
 os.makedirs(DECISIONS_DIR, exist_ok=True)
 DECISIONS_LOG = os.path.join(DECISIONS_DIR, "decisions.log")
+DECISIONS_JSONL = os.path.join(DECISIONS_DIR, "decisions.jsonl")
 
 logger = logging.getLogger("omybot.agent")
 logger.setLevel(logging.DEBUG)
@@ -64,6 +66,9 @@ class LPAgent:
     MAX_REBALANCE_TIME = 86_400.0
     VOL_5M_WINDOW = 20
     VOL_1H_WINDOW = 240
+    MIN_SETUP_USDC_RAW = 1_000_000  # 1 USDC minimum for first mint path
+    REBALANCE_FAILURE_BASE_BACKOFF = 60
+    REBALANCE_FAILURE_MAX_BACKOFF = 300
 
     def __init__(self, private_key: str):
         rpc_url = config.LOCAL_RPC_URL if config.USE_FORK else config.BASE_RPC_URL
@@ -87,6 +92,8 @@ class LPAgent:
         self.rebalance_pending = False
         self.last_fee_collect_ts = 0.0
         self.last_rebalance_ts = time.time()
+        self.consecutive_rebalance_failures = 0
+        self.next_rebalance_allowed_ts = 0.0
 
         # Runtime feature tracking for PPO observations
         self.price_history: deque[float] = deque(maxlen=self.VOL_1H_WINDOW + 1)
@@ -97,6 +104,7 @@ class LPAgent:
             token_id = position.get("token_id")
             if token_id is not None and "entry_price" in position:
                 self.position_entry_prices[token_id] = float(position["entry_price"])
+        self._validate_persisted_positions()
         self._ensure_entry_prices_for_positions()
 
         # Optional PPO model loading
@@ -165,6 +173,62 @@ class LPAgent:
                 json.dump(self.positions, f, indent=2)
             logger.info("Backfilled missing entry_price for legacy positions")
 
+    def _save_positions(self) -> None:
+        positions_file = os.path.join(os.path.dirname(__file__), "positions", "positions.json")
+        with open(positions_file, "w") as f:
+            json.dump(self.positions, f, indent=2)
+
+    def _remove_position(self, token_id: int, reason: str) -> None:
+        before = len(self.positions)
+        self.positions = [p for p in self.positions if p.get("token_id") != token_id]
+        self.position_entry_prices.pop(token_id, None)
+        if len(self.positions) != before:
+            self._save_positions()
+            logger.warning("Removed stale position token_id=%s (%s)", token_id, reason)
+
+    def _validate_persisted_positions(self) -> None:
+        """Drop persisted positions that are invalid for the current fork/account."""
+        if not self.positions:
+            return
+
+        valid_positions = []
+        pm = self.lp_manager.position_manager
+        for position in self.positions:
+            token_id = position.get("token_id")
+            if token_id is None:
+                continue
+            try:
+                owner = pm.functions.ownerOf(token_id).call()
+                if owner.lower() != self.account.address.lower():
+                    logger.warning(
+                        "Ignoring persisted token_id=%s (owner=%s, expected=%s)",
+                        token_id,
+                        owner,
+                        self.account.address,
+                    )
+                    continue
+                liquidity = pm.functions.getPositionLiquidity(token_id).call()
+                if int(liquidity) <= 0:
+                    logger.warning(
+                        "Ignoring persisted token_id=%s (zero liquidity on current fork)",
+                        token_id,
+                    )
+                    continue
+            except Exception as e:
+                logger.warning(
+                    "Ignoring persisted token_id=%s (not readable on current fork: %s)",
+                    token_id,
+                    e,
+                )
+                continue
+
+            valid_positions.append(position)
+
+        if len(valid_positions) != len(self.positions):
+            self.positions = valid_positions
+            self._save_positions()
+            logger.info("Retained %d valid persisted position(s)", len(self.positions))
+
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
@@ -193,6 +257,12 @@ class LPAgent:
         eth_balance = self.w3.eth.get_balance(self.account.address)
         usdc_contract = self.lp_manager.usdc
         usdc_balance = usdc_contract.functions.balanceOf(self.account.address).call()
+        if usdc_balance < self.MIN_SETUP_USDC_RAW:
+            raise RuntimeError(
+                "Agent wallet has insufficient USDC for initial mint. "
+                "Fund via whale impersonation (see research/CLAUDE_CODE_GUIDE.md Step 6.2) "
+                "or run `python run_e2e.py` from omybot/."
+            )
 
         # Use up to 50% of balances for safety margin
         amount0_max = eth_balance // 2  # ETH (currency0)
@@ -379,6 +449,11 @@ class LPAgent:
             if new_upper - new_lower < min_width:
                 return None
 
+        # Reject PPO proposals that do not bracket the current price.
+        # This prevents pathological perpetual out-of-range loops.
+        if not (new_lower <= current_tick <= new_upper):
+            return None
+
         return new_lower, new_upper
 
     def _rule_based_decision(self, pool_state: dict, position: dict) -> str:
@@ -483,7 +558,18 @@ class LPAgent:
 
             # Get current liquidity of the position
             pm = self.lp_manager.position_manager
-            old_liquidity = pm.functions.getPositionLiquidity(token_id).call()
+            try:
+                owner = pm.functions.ownerOf(token_id).call()
+                if owner.lower() != self.account.address.lower():
+                    self._remove_position(token_id, "token no longer owned by agent")
+                    return
+                old_liquidity = pm.functions.getPositionLiquidity(token_id).call()
+            except Exception as e:
+                self._remove_position(token_id, f"token unreadable ({e})")
+                return
+            if int(old_liquidity) <= 0:
+                self._remove_position(token_id, "zero liquidity")
+                return
 
             # Withdraw liquidity first so wallet balances reflect available funds
             logger.info("Withdrawing liquidity before re-minting...")
@@ -542,12 +628,12 @@ class LPAgent:
                 p for p in self.lp_manager.load_positions() if p["token_id"] != token_id
             ]
             # Re-save without the old one
-            positions_file = os.path.join(os.path.dirname(__file__), "positions", "positions.json")
-            with open(positions_file, "w") as f:
-                json.dump(self.positions, f, indent=2)
+            self._save_positions()
 
             # Reload
             self.positions = self.lp_manager.load_positions()
+            self.consecutive_rebalance_failures = 0
+            self.next_rebalance_allowed_ts = 0.0
             self.last_rebalance_ts = time.time()
             logger.info(
                 "Rebalance complete: new token_id=%s  range=[%d, %d]",
@@ -590,9 +676,34 @@ class LPAgent:
                     self.log_decision(pool_state, position, decision, source)
 
                     if decision != "HOLD" and not self.rebalance_pending:
+                        if (
+                            decision == "REBALANCE"
+                            and time.time() < self.next_rebalance_allowed_ts
+                        ):
+                            cooldown_left = int(self.next_rebalance_allowed_ts - time.time())
+                            logger.warning(
+                                "Skipping REBALANCE due to backoff (%ds left)",
+                                max(cooldown_left, 0),
+                            )
+                            continue
                         self.rebalance_pending = True
                         try:
                             self.execute_decision(decision, position, ppo_action)
+                        except Exception as e:
+                            if decision == "REBALANCE":
+                                self.consecutive_rebalance_failures += 1
+                                penalty = self.REBALANCE_FAILURE_BASE_BACKOFF * (
+                                    2 ** max(0, self.consecutive_rebalance_failures - 1)
+                                )
+                                penalty = min(penalty, self.REBALANCE_FAILURE_MAX_BACKOFF)
+                                self.next_rebalance_allowed_ts = time.time() + penalty
+                                logger.error(
+                                    "REBALANCE failed (%d consecutive). Backing off for %ds: %s",
+                                    self.consecutive_rebalance_failures,
+                                    penalty,
+                                    e,
+                                )
+                            raise
                         finally:
                             self.rebalance_pending = False
 
@@ -632,6 +743,20 @@ class LPAgent:
             in_range,
             position.get("token_id"),
         )
+
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "decision": decision,
+            "source": source,
+            "tick": current_tick,
+            "price": round(pool_state["price"], 2),
+            "range": [tick_lower, tick_upper],
+            "drift": round(drift_ratio, 4),
+            "in_range": in_range,
+            "token_id": position.get("token_id"),
+        }
+        with open(DECISIONS_JSONL, "a") as f:
+            f.write(json.dumps(record) + "\n")
 
     # ------------------------------------------------------------------
     # Helpers

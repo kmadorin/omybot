@@ -247,6 +247,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interval", type=int, default=30, help="Seconds between swaps")
     parser.add_argument("--eth-in", type=float, default=3.0, help="ETH amount per ETH->USDC swap")
     parser.add_argument("--usdc-in", type=float, default=6000.0, help="USDC amount per USDC->ETH swap")
+    parser.add_argument(
+        "--start-direction",
+        choices=["eth_to_usdc", "usdc_to_eth"],
+        default="eth_to_usdc",
+        help="Direction of the first swap cycle",
+    )
     return parser.parse_args()
 
 
@@ -265,12 +271,14 @@ def main() -> int:
     eth_in_wei = int(args.eth_in * 10**18)
     usdc_in_6 = int(args.usdc_in * 10**6)
 
+    start_eth_to_usdc = args.start_direction == "eth_to_usdc"
     for i in range(args.cycles):
-        direction = "ETH->USDC" if i % 2 == 0 else "USDC->ETH"
+        eth_to_usdc = start_eth_to_usdc if i % 2 == 0 else not start_eth_to_usdc
+        direction = "ETH->USDC" if eth_to_usdc else "USDC->ETH"
         tick_before, price_before = simulator.get_pool_snapshot()
 
         try:
-            if i % 2 == 0:
+            if eth_to_usdc:
                 tx_hash = simulator.execute_eth_to_usdc(eth_in_wei)
             else:
                 tx_hash = simulator.execute_usdc_to_eth(usdc_in_6)

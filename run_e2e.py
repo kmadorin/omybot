@@ -51,6 +51,7 @@ class E2ERunner:
 
         self.positions_file = self.agent_dir / "positions" / "positions.json"
         self.decisions_log = self.agent_dir / "decisions" / "decisions.log"
+        self.decisions_jsonl = self.agent_dir / "decisions" / "decisions.jsonl"
 
         self.procs: list[Proc] = []
 
@@ -135,7 +136,8 @@ class E2ERunner:
     def _prepare_state(self) -> None:
         self._backup_if_exists(self.positions_file)
         self._backup_if_exists(self.decisions_log)
-        for path in (self.positions_file, self.decisions_log):
+        self._backup_if_exists(self.decisions_jsonl)
+        for path in (self.positions_file, self.decisions_log, self.decisions_jsonl):
             if path.exists():
                 path.unlink()
 

@@ -2,6 +2,7 @@
   "name": "omybot",
   "private": true,
   "scripts": {
-    "anvil:fork:base": "anvil --fork-url https://mainnet.base.org --chain-id 8453"
+    "anvil:fork:base": "anvil --fork-url https://mainnet.base.org --chain-id 8453",
+    "demo": "python run_demo.py"
   }
 }

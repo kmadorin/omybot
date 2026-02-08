@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmyBot Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    body { background: #111827; color: #e5e7eb; font-family: 'Inter', system-ui, sans-serif; }
+    .card { background: #1f2937; border: 1px solid #374151; border-radius: 0.75rem; padding: 1.25rem; }
+    .glow-green { animation: pulseGreen 2s infinite; }
+    @keyframes pulseGreen { 0%,100%{box-shadow:0 0 4px #22c55e} 50%{box-shadow:0 0 12px #22c55e} }
+    .flash-up { transition: color 0.3s; color: #22c55e !important; }
+    .flash-down { transition: color 0.3s; color: #ef4444 !important; }
+    .badge { padding: 2px 8px; border-radius: 9999px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+    .badge-hold { background: #166534; color: #86efac; }
+    .badge-rebalance { background: #1e3a5f; color: #93c5fd; }
+    .badge-collect { background: #854d0e; color: #fde68a; }
+    .badge-in { background: #166534; color: #86efac; }
+    .badge-out { background: #991b1b; color: #fca5a5; }
+    .range-bar { height: 8px; border-radius: 4px; background: #374151; position: relative; overflow: hidden; }
+    .range-fill { position: absolute; top: 0; height: 100%; border-radius: 4px; }
+    .range-marker { position: absolute; top: -4px; width: 2px; height: 16px; background: #fff; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    th { text-align: left; padding: 6px 8px; color: #9ca3af; border-bottom: 1px solid #374151; font-weight: 500; }
+    td { padding: 6px 8px; border-bottom: 1px solid #1f2937; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #1f2937; }
+    ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+  </style>
+</head>
+<body class="min-h-screen p-4">
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6 px-2">
+    <div class="flex items-center gap-4">
+      <h1 class="text-2xl font-bold text-white tracking-tight">OMYBOT</h1>
+      <span class="text-gray-400 text-sm">AI LP Agent</span>
+      <span class="text-gray-500 text-sm">ETH / USDC</span>
+    </div>
+    <div class="flex items-center gap-2" id="status-area">
+      <span id="status-dot" class="w-3 h-3 rounded-full bg-gray-500 inline-block"></span>
+      <span id="status-text" class="text-sm text-gray-400">Connecting...</span>
+    </div>
+  </div>
+
+  <!-- Top cards -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <!-- Wallet -->
+    <div class="card">
+      <div class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Wallet</div>
+      <div id="wallet-addr" class="text-xs text-gray-500 font-mono mb-3 truncate"></div>
+      <div class="flex gap-6">
+        <div>
+          <div class="text-xs text-gray-500">ETH</div>
+          <div id="wallet-eth" class="text-xl font-semibold text-white">--</div>
+        </div>
+        <div>
+          <div class="text-xs text-gray-500">USDC</div>
+          <div id="wallet-usdc" class="text-xl font-semibold text-white">--</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pool State -->
+    <div class="card">
+      <div class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Pool State</div>
+      <div id="pool-price" class="text-3xl font-bold text-cyan-400 mb-1">--</div>
+      <div class="grid grid-cols-3 gap-2 text-xs text-gray-400">
+        <div>Tick: <span id="pool-tick" class="text-gray-200">--</span></div>
+        <div>Liq: <span id="pool-liq" class="text-gray-200">--</span></div>
+        <div>Fee: <span id="pool-fee" class="text-gray-200">--</span></div>
+      </div>
+    </div>
+
+    <!-- Position -->
+    <div class="card" id="position-card">
+      <div class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Active Position</div>
+      <div id="position-content">
+        <div class="text-gray-500 text-sm">No position</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Price Chart -->
+  <div class="card mb-4">
+    <div class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Price History</div>
+    <div style="height: 260px; position: relative;">
+      <canvas id="price-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Bottom tables -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <!-- Decisions -->
+    <div class="card">
+      <div class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Decision History</div>
+      <div style="max-height: 300px; overflow-y: auto;">
+        <table>
+          <thead><tr>
+            <th>Time</th><th>Decision</th><th>Source</th><th>Price</th><th>Drift</th><th>Range</th>
+          </tr></thead>
+          <tbody id="decisions-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Swaps -->
+    <div class="card">
+      <div class="text-xs text-gray-500 mb-2 uppercase tracking-wider">Recent Swaps</div>
+      <div style="max-height: 300px; overflow-y: auto;">
+        <table>
+          <thead><tr>
+            <th>Block</th><th>Dir</th><th>Amount ETH</th><th>Amount USDC</th><th>Price After</th>
+          </tr></thead>
+          <tbody id="swaps-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="text-center text-gray-600 text-xs mt-6 mb-2">
+    OmyBot &mdash; AI-Powered Uniswap V4 LP Manager &mdash; HackMoney 2026
+  </div>
+
+<script>
+const POLL_MS = 5000;
+let chart = null;
+let lastPrice = null;
+
+// ------------------------------------------------------------------
+// Chart setup
+// ------------------------------------------------------------------
+function initChart() {
+  const ctx = document.getElementById('price-chart').getContext('2d');
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'ETH/USDC',
+          data: [],
+          borderColor: '#22d3ee',
+          backgroundColor: 'rgba(34,211,238,0.08)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0,
+          borderWidth: 2,
+        },
+        {
+          label: 'Range Upper',
+          data: [],
+          borderColor: 'rgba(134,239,172,0.4)',
+          borderDash: [6, 4],
+          pointRadius: 0,
+          borderWidth: 1,
+          fill: false,
+        },
+        {
+          label: 'Range Lower',
+          data: [],
+          borderColor: 'rgba(252,165,165,0.4)',
+          borderDash: [6, 4],
+          pointRadius: 0,
+          borderWidth: 1,
+          fill: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      plugins: {
+        legend: { display: false },
+        tooltip: { mode: 'index', intersect: false },
+      },
+      scales: {
+        x: {
+          display: true,
+          ticks: { color: '#6b7280', maxTicksLimit: 8, font: { size: 10 } },
+          grid: { color: 'rgba(75,85,99,0.3)' },
+        },
+        y: {
+          display: true,
+          ticks: { color: '#6b7280', font: { size: 10 } },
+          grid: { color: 'rgba(75,85,99,0.3)' },
+        },
+      },
+      interaction: { mode: 'nearest', axis: 'x', intersect: false },
+    },
+  });
+}
+
+// ------------------------------------------------------------------
+// Update functions
+// ------------------------------------------------------------------
+function updateStatusDot(status, age) {
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+  dot.className = 'w-3 h-3 rounded-full inline-block';
+  if (status === 'ok') {
+    dot.classList.add('bg-green-500', 'glow-green');
+    txt.textContent = 'Live';
+    txt.className = 'text-sm text-green-400';
+  } else if (status === 'stale') {
+    dot.classList.add('bg-yellow-500');
+    txt.textContent = `Stale (${Math.round(age)}s ago)`;
+    txt.className = 'text-sm text-yellow-400';
+  } else if (status === 'degraded') {
+    dot.classList.add('bg-yellow-500');
+    txt.textContent = 'Degraded';
+    txt.className = 'text-sm text-yellow-400';
+  } else if (status === 'error') {
+    dot.classList.add('bg-red-500');
+    txt.textContent = 'Error';
+    txt.className = 'text-sm text-red-400';
+  } else if (status === 'initializing') {
+    dot.classList.add('bg-gray-500');
+    txt.textContent = 'Connecting...';
+    txt.className = 'text-sm text-gray-400';
+  } else {
+    dot.classList.add('bg-red-500');
+    txt.textContent = 'Disconnected';
+    txt.className = 'text-sm text-red-400';
+  }
+}
+
+function updateWallet(w) {
+  if (!w || !w.address) return;
+  document.getElementById('wallet-addr').textContent =
+    w.address.slice(0, 6) + '...' + w.address.slice(-4);
+  document.getElementById('wallet-eth').textContent = w.eth_balance.toFixed(4);
+  document.getElementById('wallet-usdc').textContent = w.usdc_balance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function updatePool(p) {
+  if (!p || !p.price) return;
+  const priceEl = document.getElementById('pool-price');
+  const newPrice = p.price;
+
+  if (lastPrice !== null && newPrice !== lastPrice) {
+    priceEl.classList.remove('flash-up', 'flash-down');
+    void priceEl.offsetWidth; // reflow
+    priceEl.classList.add(newPrice > lastPrice ? 'flash-up' : 'flash-down');
+    setTimeout(() => priceEl.classList.remove('flash-up', 'flash-down'), 1000);
+  }
+  lastPrice = newPrice;
+
+  priceEl.textContent = '$' + newPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  document.getElementById('pool-tick').textContent = p.tick;
+  document.getElementById('pool-liq').textContent = formatBigNum(p.liquidity);
+  document.getElementById('pool-fee').textContent = (p.lpFee / 10000).toFixed(2) + '%';
+}
+
+function updatePositions(positions, pool) {
+  const container = document.getElementById('position-content');
+  if (!positions || positions.length === 0) {
+    container.innerHTML = '<div class="text-gray-500 text-sm">No position</div>';
+    return;
+  }
+  const pos = positions[positions.length - 1]; // latest position
+  const currentTick = pool ? pool.tick : 0;
+
+  // Range bar
+  const rangeTicks = pos.tick_upper - pos.tick_lower;
+  const tickOffset = currentTick - pos.tick_lower;
+  const pct = Math.max(0, Math.min(100, (tickOffset / rangeTicks) * 100));
+  const fillColor = pos.in_range ? '#22c55e' : '#ef4444';
+  const distanceTicks = Number(pos.position_distance_ticks || 0);
+  let distanceLabel = 'In range';
+  let distanceClass = 'text-green-400';
+  if (!pos.in_range) {
+    const side = pos.position_distance_side === 'below_range' ? 'below' : 'above';
+    distanceLabel = `${distanceTicks} ticks ${side} range`;
+    distanceClass = 'text-red-400';
+  }
+
+  const ageStr = pos.created_at ? timeSince(pos.created_at) : '--';
+
+  container.innerHTML = `
+    <div class="flex items-center gap-2 mb-2">
+      <span class="text-xs text-gray-500">ID: ${pos.token_id}</span>
+      <span class="badge ${pos.in_range ? 'badge-in' : 'badge-out'}">${pos.in_range ? 'In Range' : 'Out of Range'}</span>
+    </div>
+    <div class="range-bar mb-2">
+      <div class="range-fill" style="left:0;width:${pct}%;background:${fillColor};opacity:0.5;"></div>
+      <div class="range-marker" style="left:${pct}%;"></div>
+    </div>
+    <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+      <div class="text-gray-500">Range</div>
+      <div class="text-gray-200">$${pos.price_lower.toLocaleString()} - $${pos.price_upper.toLocaleString()}</div>
+      <div class="text-gray-500">Entry Price</div>
+      <div class="text-gray-200">$${pos.entry_price.toLocaleString()}</div>
+      <div class="text-gray-500">Distance</div>
+      <div class="${distanceClass}">${distanceLabel}</div>
+      <div class="text-gray-500">Price Change</div>
+      <div class="${pos.price_change_pct >= 0 ? 'text-green-400' : 'text-red-400'}">${pos.price_change_pct >= 0 ? '+' : ''}${pos.price_change_pct.toFixed(2)}%</div>
+      <div class="text-gray-500">Est. IL</div>
+      <div class="text-red-400">${pos.il_est_pct.toFixed(4)}%</div>
+      <div class="text-gray-500">Position Age</div>
+      <div class="text-gray-200">${ageStr}</div>
+    </div>
+  `;
+}
+
+function updateDecisions(decisions) {
+  const tbody = document.getElementById('decisions-body');
+  if (!decisions || decisions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-gray-500 text-center">No decisions yet</td></tr>';
+    return;
+  }
+  // Newest first
+  const reversed = [...decisions].reverse().slice(0, 30);
+  tbody.innerHTML = reversed.map(d => {
+    const badgeClass = d.decision === 'HOLD' ? 'badge-hold'
+      : d.decision === 'REBALANCE' ? 'badge-rebalance' : 'badge-collect';
+    const ts = formatTs(d.ts);
+    const rangeStr = d.range ? `${d.range[0]}..${d.range[1]}` : '--';
+    return `<tr>
+      <td class="text-gray-400">${ts}</td>
+      <td><span class="badge ${badgeClass}">${d.decision}</span></td>
+      <td>${d.source || '--'}</td>
+      <td>$${d.price}</td>
+      <td>${d.drift !== undefined ? d.drift.toFixed(3) : '--'}</td>
+      <td class="text-gray-500 text-xs">${rangeStr}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateSwaps(swaps) {
+  const tbody = document.getElementById('swaps-body');
+  if (!swaps || swaps.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="text-gray-500 text-center">No swaps yet</td></tr>';
+    return;
+  }
+  const reversed = [...swaps].reverse().slice(0, 15);
+  tbody.innerHTML = reversed.map(s => {
+    const amt0 = BigInt(s.amount0);
+    const amt1 = BigInt(s.amount1);
+    // Negative amount0 = ETH sold into pool (sell), positive = ETH bought (buy)
+    const isSell = amt0 < 0n;
+    const dir = isSell
+      ? '<span class="text-red-400">&#x2193; Sell</span>'
+      : '<span class="text-green-400">&#x2191; Buy</span>';
+    const ethAmt = Number(amt0 < 0n ? -amt0 : amt0) / 1e18;
+    const usdcAmt = Number(amt1 < 0n ? -amt1 : amt1) / 1e6;
+    return `<tr>
+      <td class="text-gray-400">${s.block_number}</td>
+      <td>${dir}</td>
+      <td>${ethAmt.toFixed(6)}</td>
+      <td>${usdcAmt.toFixed(2)}</td>
+      <td>$${s.price_after.toLocaleString()}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateChart(priceHistory, positions) {
+  if (!chart || !priceHistory || priceHistory.length === 0) return;
+
+  const labels = priceHistory.map(h => {
+    const d = new Date(h.t * 1000);
+    return d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+  });
+  const prices = priceHistory.map(h => h.p);
+
+  // Position range lines
+  let upper = [], lower = [];
+  if (positions && positions.length > 0) {
+    const pos = positions[positions.length - 1];
+    upper = prices.map(() => pos.price_upper);
+    lower = prices.map(() => pos.price_lower);
+  }
+
+  chart.data.labels = labels;
+  chart.data.datasets[0].data = prices;
+  chart.data.datasets[1].data = upper;
+  chart.data.datasets[2].data = lower;
+  chart.update('none');
+}
+
+// ------------------------------------------------------------------
+// Helpers
+// ------------------------------------------------------------------
+function formatBigNum(s) {
+  if (!s) return '--';
+  const n = Number(s);
+  if (n >= 1e18) return (n / 1e18).toFixed(1) + 'E';
+  if (n >= 1e15) return (n / 1e15).toFixed(1) + 'P';
+  if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return s;
+}
+
+function formatTs(ts) {
+  if (!ts) return '--';
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return ts.slice(0, 19);
+    return d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+  } catch { return ts.slice(0, 19); }
+}
+
+function timeSince(isoStr) {
+  try {
+    const d = new Date(isoStr);
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  } catch { return '--'; }
+}
+
+// ------------------------------------------------------------------
+// Polling
+// ------------------------------------------------------------------
+async function poll() {
+  try {
+    const res = await fetch('/api/state');
+    const data = await res.json();
+    updateStatusDot(data.status, data.age_seconds);
+    updateWallet(data.wallet);
+    updatePool(data.pool);
+    updatePositions(data.positions, data.pool);
+    updateDecisions(data.decisions);
+    updateSwaps(data.recent_swaps);
+    updateChart(data.price_history, data.positions);
+    if (data.errors && data.errors.length > 0) {
+      console.warn('Backend errors:', data.errors);
+    }
+  } catch (err) {
+    updateStatusDot('disconnected', null);
+    console.error('Poll failed:', err);
+  }
+}
+
+initChart();
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>
