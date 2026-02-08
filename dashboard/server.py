@@ -105,6 +105,9 @@ class Collector:
         self.last_swap_block = 0
         self.swap_cache = []
         self.swap_seen = set()
+        self.max_log_block_range = max(
+            1, int(os.environ.get("SWAP_LOG_BLOCK_RANGE", "10"))
+        )
 
         # Price history
         self.price_history = self._load_price_history()
@@ -297,31 +300,42 @@ class Collector:
 
     def _get_swaps(self):
         current_block = self.w3.eth.block_number
-        from_block = max(self.last_swap_block + 1, current_block - 200)
+        from_block = max(self.last_swap_block + 1, current_block - self.max_log_block_range)
         if from_block > current_block:
             return self.swap_cache
 
+        to_block = min(current_block, from_block + self.max_log_block_range - 1)
         pool_id_topic = "0x" + config.POOL_ID[2:].rjust(64, "0")
         try:
             logs = self.w3.eth.get_logs(
                 {
                     "address": Web3.to_checksum_address(config.POOL_MANAGER),
                     "fromBlock": from_block,
-                    "toBlock": current_block,
+                    "toBlock": to_block,
                     "topics": [self.swap_topic0, pool_id_topic],
                 }
             )
         except Exception as e:
             # Some RPC providers intermittently reject the stricter topic query.
             logger.warning("Swap log query failed, retrying with broader filter: %s", e)
-            logs = self.w3.eth.get_logs(
-                {
-                    "address": Web3.to_checksum_address(config.POOL_MANAGER),
-                    "fromBlock": max(self.last_swap_block + 1, current_block - 50),
-                    "toBlock": current_block,
-                    "topics": [self.swap_topic0],
-                }
-            )
+            try:
+                logs = self.w3.eth.get_logs(
+                    {
+                        "address": Web3.to_checksum_address(config.POOL_MANAGER),
+                        "fromBlock": from_block,
+                        "toBlock": to_block,
+                        "topics": [self.swap_topic0],
+                    }
+                )
+            except Exception as e2:
+                # For stricter provider plans, reduce window and continue.
+                if "400" in str(e2):
+                    self.max_log_block_range = max(1, self.max_log_block_range // 2)
+                    logger.warning(
+                        "Swap log query still failing (400). Reducing SWAP_LOG_BLOCK_RANGE to %d",
+                        self.max_log_block_range,
+                    )
+                raise
 
         for raw_log in logs:
             ev = get_event_data(self.w3.codec, self.swap_event_abi, raw_log)
@@ -363,7 +377,7 @@ class Collector:
                 (s["tx_hash"], s["log_index"]) for s in self.swap_cache
             }
 
-        self.last_swap_block = current_block
+        self.last_swap_block = to_block
         return self.swap_cache
 
     # ------------------------------------------------------------------

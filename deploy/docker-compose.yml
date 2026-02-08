@@ -126,6 +126,7 @@ services:
       USE_FORK: "false"
       BASE_RPC_URL: "${MAINNET_BASE_RPC_URL:-https://mainnet.base.org}"
       AGENT_ADDR: "${MAINNET_AGENT_ADDR}"
+      SWAP_LOG_BLOCK_RANGE: "10"
       DASHBOARD_HOST: "0.0.0.0"
       DASHBOARD_PORT: "5005"
     ports:
