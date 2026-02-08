@@ -62,7 +62,7 @@ BASE_BLOCK_TIME = 2
 
 
 def build_pool_key():
-    from eth_utils import to_checksum_address
+    from eth_utils.address import to_checksum_address
 
     currency0 = to_checksum_address(ETH_ADDRESS)
     currency1 = to_checksum_address(USDC_ADDRESS)

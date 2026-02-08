@@ -10,7 +10,7 @@ import time
 from decimal import Decimal, getcontext
 
 from eth_abi import encode as abi_encode
-from eth_utils import to_checksum_address
+from eth_utils.address import to_checksum_address
 from web3 import Web3
 
 import config
