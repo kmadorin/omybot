@@ -292,14 +292,35 @@ class LPAgent:
 
         deadline = int(time.time()) + 600
 
-        result = self.lp_manager.mint_position(
-            tick_lower=tick_lower,
-            tick_upper=tick_upper,
-            liquidity=self.DEFAULT_LIQUIDITY,
-            amount0_max=amount0_max,
-            amount1_max=amount1_max,
-            deadline=deadline,
-        )
+        liquidity_to_mint = self.DEFAULT_LIQUIDITY
+        result = None
+        for _ in range(4):
+            try:
+                result = self.lp_manager.mint_position(
+                    tick_lower=tick_lower,
+                    tick_upper=tick_upper,
+                    liquidity=liquidity_to_mint,
+                    amount0_max=amount0_max,
+                    amount1_max=amount1_max,
+                    deadline=deadline,
+                )
+                break
+            except RuntimeError as e:
+                if "reverted" not in str(e).lower():
+                    raise
+                next_liquidity = max(1, liquidity_to_mint // 10)
+                if next_liquidity == liquidity_to_mint:
+                    raise
+                logger.warning(
+                    "Initial mint reverted at liquidity=%d; retrying with liquidity=%d",
+                    liquidity_to_mint,
+                    next_liquidity,
+                )
+                liquidity_to_mint = next_liquidity
+                time.sleep(1)
+
+        if result is None:
+            raise RuntimeError("Failed to mint initial position after liquidity retries")
 
         token_id = result["token_id"]
         self.lp_manager.save_position(

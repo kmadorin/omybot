@@ -6,11 +6,13 @@ Uses raw eth_abi encoding for action commands sent via modifyLiquidities().
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 
 from eth_abi import encode as abi_encode
 from eth_utils.address import to_checksum_address
 from web3 import Web3
+from web3.exceptions import Web3RPCError
 
 logger = logging.getLogger(__name__)
 
@@ -395,28 +397,50 @@ class LPManager:
     ) -> dict:
         """Encode unlockData, build tx, sign, send, and wait for receipt."""
         unlock_data = abi_encode(["bytes", "bytes[]"], [actions, params])
+        last_error = None
 
-        tx = self.position_manager.functions.modifyLiquidities(
-            unlock_data, deadline
-        ).build_transaction(
-            {
-                "from": self.account.address,
-                "nonce": self.w3.eth.get_transaction_count(self.account.address),
-                "value": value,
-                "gas": 1_000_000,
-                "gasPrice": self.w3.eth.gas_price,
-            }
-        )
+        for attempt in range(3):
+            try:
+                tx = self.position_manager.functions.modifyLiquidities(
+                    unlock_data, deadline
+                ).build_transaction(
+                    {
+                        "from": self.account.address,
+                        "nonce": self.w3.eth.get_transaction_count(
+                            self.account.address, "pending"
+                        ),
+                        "value": value,
+                        "gas": 1_000_000,
+                        "gasPrice": int(self.w3.eth.gas_price * (1 + 0.15 * attempt)),
+                    }
+                )
 
-        signed = self.account.sign_transaction(tx)
-        tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
-        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+                signed = self.account.sign_transaction(tx)
+                tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
 
-        if receipt["status"] != 1:
-            logger.error("Transaction reverted: tx=%s", tx_hash.hex())
-            raise RuntimeError(f"modifyLiquidities reverted: {tx_hash.hex()}")
+                if receipt["status"] != 1:
+                    logger.error("Transaction reverted: tx=%s", tx_hash.hex())
+                    raise RuntimeError(f"modifyLiquidities reverted: {tx_hash.hex()}")
 
-        return receipt
+                return receipt
+            except (Web3RPCError, ValueError) as e:
+                message = str(e).lower()
+                if (
+                    "replacement transaction underpriced" in message
+                    or "nonce too low" in message
+                ):
+                    logger.warning(
+                        "Retrying modifyLiquidities after nonce/gas race (attempt %d/3): %s",
+                        attempt + 1,
+                        e,
+                    )
+                    last_error = e
+                    time.sleep(1 + attempt)
+                    continue
+                raise
+
+        raise RuntimeError(f"modifyLiquidities failed after retries: {last_error}")
 
     # ------------------------------------------------------------------
     # Parse token ID from receipt (ERC721 Transfer event)
