@@ -1,0 +1,7 @@
+omybot.simula.online {
+    reverse_proxy mainnet-dashboard:5005
+}
+
+omybotdemo.simula.online {
+    reverse_proxy demo-dashboard:5005
+}

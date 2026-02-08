@@ -28,12 +28,9 @@ getcontext().prec = 40
 # ---------------------------------------------------------------------------
 AGENT_DIR = Path(__file__).resolve().parent.parent / "agent"
 sys.path.insert(0, str(AGENT_DIR))
-import config
+import config  # loads agent/.env automatically
 from state_reader import StateReader
 
-from dotenv import load_dotenv
-
-load_dotenv(AGENT_DIR / ".env")
 AGENT_ADDRESS = os.environ.get(
     "AGENT_ADDR", "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 )
@@ -71,7 +68,8 @@ snapshot_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 class Collector:
     def __init__(self):
-        self.w3 = Web3(Web3.HTTPProvider(config.LOCAL_RPC_URL))
+        rpc_url = config.LOCAL_RPC_URL if config.USE_FORK else config.BASE_RPC_URL
+        self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         self.state_reader = StateReader(self.w3, config)
 
         # Load ABIs

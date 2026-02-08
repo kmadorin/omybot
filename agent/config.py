@@ -1,7 +1,18 @@
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load agent/.env into os.environ BEFORE reading any env-backed settings.
+# override=False means Docker/shell env vars take precedence over .env.
+load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+
 # Base chain (chain ID 8453)
-BASE_RPC_URL = "https://mainnet.base.org"
-LOCAL_RPC_URL = "http://localhost:8545"
-USE_FORK = True
+BASE_RPC_URL = os.environ.get("BASE_RPC_URL", "https://mainnet.base.org")
+LOCAL_RPC_URL = os.environ.get("LOCAL_RPC_URL", "http://localhost:8545")
+USE_FORK = os.environ.get("USE_FORK", "true").lower() in ("true", "1", "yes")
+
+EXPECTED_CHAIN_ID = int(os.environ.get("EXPECTED_CHAIN_ID", "8453"))
 
 # Uniswap V4 contracts on Base
 POOL_MANAGER = "0x498581fF718922c3f8e6A244956aF099B2652b2b"
@@ -68,8 +79,8 @@ def build_pool_key():
 
 
 def compute_pool_id():
-    from eth_abi import encode
-    from eth_utils import keccak
+    from eth_abi.abi import encode
+    from eth_utils.crypto import keccak
 
     pool_key = build_pool_key()
     pool_key_encoded = encode(

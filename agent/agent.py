@@ -78,6 +78,14 @@ class LPAgent:
             raise ConnectionError(f"Cannot connect to RPC at {rpc_url}")
         logger.info("Connected. Chain ID: %d", self.w3.eth.chain_id)
 
+        actual_chain = self.w3.eth.chain_id
+        expected_chain = config.EXPECTED_CHAIN_ID
+        if actual_chain != expected_chain:
+            raise RuntimeError(
+                f"Chain ID mismatch: expected {expected_chain}, got {actual_chain}. "
+                "Aborting to prevent fund loss."
+            )
+
         self.account = self.w3.eth.account.from_key(private_key)
         logger.info("Agent address: %s", self.account.address)
 
@@ -128,6 +136,12 @@ class LPAgent:
                 self.model = None
         else:
             logger.info("No PPO model found, using rule-based decisions only")
+
+        if self.model is None and not config.USE_FORK:
+            logger.warning(
+                "MAINNET MODE with NO PPO model loaded — running rule-based only. "
+                "Ensure ml/models/lp_ppo_model.zip is present for AI decisions."
+            )
 
     def _derive_entry_price_from_position(self, position: dict) -> float | None:
         """Derive entry price for legacy persisted positions without entry_price."""
@@ -773,11 +787,11 @@ class LPAgent:
 # ======================================================================
 
 if __name__ == "__main__":
-    # Default: anvil account #0 private key
-    private_key = (
-        sys.argv[1]
-        if len(sys.argv) > 1
-        else "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-    )
+    private_key = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("AGENT_PK")
+    if not private_key:
+        raise RuntimeError(
+            "AGENT_PK must be provided via env var or CLI argument. "
+            "Set AGENT_PK in your .env file or pass as first argument."
+        )
     agent = LPAgent(private_key)
     agent.run()

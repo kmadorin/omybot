@@ -1,0 +1,161 @@
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-common: &common
+  <<: *logging
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  restart: unless-stopped
+
+services:
+  # ===== DEMO MODE =====
+  anvil:
+    <<: *common
+    profiles: [demo]
+    command: >
+      anvil --fork-url ${FORK_URL:-https://mainnet.base.org}
+            --chain-id 8453 --block-time 2
+            --auto-impersonate
+            --mnemonic "test test test test test test test test test test test junk"
+            --host 0.0.0.0
+    healthcheck:
+      test: ["CMD", "cast", "block-number", "--rpc-url", "http://localhost:8545"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+
+  demo-agent:
+    <<: *common
+    profiles: [demo]
+    depends_on:
+      anvil: { condition: service_healthy }
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo "Funding demo accounts..."
+        cast send 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
+          'transfer(address,uint256)' \
+          $$DEMO_AGENT_ADDR $${DEMO_AGENT_USDC_RAW:-10000000000} \
+          --from 0xBaeD383EDE0e5d9d72430661f3285DAa77E9439F \
+          --unlocked --rpc-url http://anvil:8545
+        cast send 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
+          'transfer(address,uint256)' \
+          $$DEMO_SWAP_ADDR $${DEMO_SWAP_USDC_RAW:-50000000000} \
+          --from 0xBaeD383EDE0e5d9d72430661f3285DAa77E9439F \
+          --unlocked --rpc-url http://anvil:8545
+        echo "Funding complete. Starting agent..."
+        exec python agent/agent.py
+    environment:
+      USE_FORK: "true"
+      LOCAL_RPC_URL: "http://anvil:8545"
+      AGENT_PK: "${DEMO_AGENT_PK}"
+      EXPECTED_CHAIN_ID: "8453"
+      DEMO_AGENT_ADDR: "${DEMO_AGENT_ADDR}"
+      DEMO_SWAP_ADDR: "${DEMO_SWAP_ADDR}"
+      DEMO_AGENT_USDC_RAW: "${DEMO_AGENT_USDC_RAW:-10000000000}"
+      DEMO_SWAP_USDC_RAW: "${DEMO_SWAP_USDC_RAW:-50000000000}"
+    volumes:
+      - demo-positions:/app/agent/positions
+      - demo-decisions:/app/agent/decisions
+    mem_limit: 512m
+
+  demo-dashboard:
+    <<: *common
+    profiles: [demo]
+    depends_on:
+      anvil: { condition: service_healthy }
+    command: ["python", "dashboard/server.py"]
+    environment:
+      USE_FORK: "true"
+      LOCAL_RPC_URL: "http://anvil:8545"
+      AGENT_ADDR: "${DEMO_AGENT_ADDR}"
+      DASHBOARD_HOST: "0.0.0.0"
+      DASHBOARD_PORT: "5005"
+    ports:
+      - "127.0.0.1:5006:5005"
+    volumes:
+      - demo-positions:/app/agent/positions:ro
+      - demo-decisions:/app/agent/decisions:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5005/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 256m
+
+  swap-simulator:
+    <<: *common
+    profiles: [demo]
+    depends_on:
+      demo-agent: { condition: service_started }
+    command: >
+      python agent/simulate_swaps.py
+        --rpc-url http://anvil:8545
+        --private-key ${DEMO_SWAP_PK}
+        --cycles 999999 --interval ${SWAP_INTERVAL:-30}
+        --eth-in ${SWAP_ETH_IN:-3.0} --usdc-in ${SWAP_USDC_IN:-6000.0}
+    mem_limit: 256m
+
+  # ===== MAINNET MODE =====
+  mainnet-agent:
+    <<: *common
+    profiles: [mainnet]
+    command: ["python", "agent/agent.py"]
+    environment:
+      USE_FORK: "false"
+      BASE_RPC_URL: "${MAINNET_BASE_RPC_URL:-https://mainnet.base.org}"
+      AGENT_PK: "${MAINNET_AGENT_PK}"
+      EXPECTED_CHAIN_ID: "8453"
+    volumes:
+      - mainnet-positions:/app/agent/positions
+      - mainnet-decisions:/app/agent/decisions
+    mem_limit: 512m
+
+  mainnet-dashboard:
+    <<: *common
+    profiles: [mainnet]
+    command: ["python", "dashboard/server.py"]
+    environment:
+      USE_FORK: "false"
+      BASE_RPC_URL: "${MAINNET_BASE_RPC_URL:-https://mainnet.base.org}"
+      AGENT_ADDR: "${MAINNET_AGENT_ADDR}"
+      DASHBOARD_HOST: "0.0.0.0"
+      DASHBOARD_PORT: "5005"
+    ports:
+      - "127.0.0.1:5005:5005"
+    volumes:
+      - mainnet-positions:/app/agent/positions:ro
+      - mainnet-decisions:/app/agent/decisions:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5005/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 256m
+
+  # ===== SHARED: REVERSE PROXY =====
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  demo-positions:
+  demo-decisions:
+  mainnet-positions:
+  mainnet-decisions:
+  caddy-data:
+  caddy-config:
