@@ -86,6 +86,8 @@ class LPManager:
         Native ETH needs no approval (sent as msg.value).
         """
         sender = self.account.address
+        # Use pending nonce to avoid collisions after container restarts.
+        next_nonce = self.w3.eth.get_transaction_count(sender, "pending")
 
         # Step 1: USDC.approve(Permit2, MAX_UINT256)
         tx = self.usdc.functions.approve(
@@ -93,7 +95,7 @@ class LPManager:
         ).build_transaction(
             {
                 "from": sender,
-                "nonce": self.w3.eth.get_transaction_count(sender),
+                "nonce": next_nonce,
                 "gas": 100_000,
                 "gasPrice": self.w3.eth.gas_price,
             }
@@ -112,7 +114,7 @@ class LPManager:
         ).build_transaction(
             {
                 "from": sender,
-                "nonce": self.w3.eth.get_transaction_count(sender),
+                "nonce": next_nonce + 1,
                 "gas": 100_000,
                 "gasPrice": self.w3.eth.gas_price,
             }
