@@ -6,6 +6,7 @@ anvil fork and agent files. Serves a single-page dashboard at localhost:5005.
 """
 
 import json
+import logging
 import math
 import os
 import re
@@ -22,6 +23,7 @@ from web3 import Web3
 from web3._utils.events import get_event_data
 
 getcontext().prec = 40
+logger = logging.getLogger("omybot.dashboard")
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -126,7 +128,8 @@ class Collector:
         wallet = self._safe_call(self._get_wallet, errors)
         positions = self._safe_call(lambda: self._get_positions(pool), errors)
         decisions = self._safe_call(self._get_decisions, errors)
-        self._safe_call(self._get_swaps, errors)
+        # Swap feed should not degrade core health if log RPC is temporarily flaky.
+        self._safe_call(self._get_swaps, [])
 
         if pool:
             self._update_price_history(pool["price"])
@@ -299,17 +302,40 @@ class Collector:
             return self.swap_cache
 
         pool_id_topic = "0x" + config.POOL_ID[2:].rjust(64, "0")
-        logs = self.w3.eth.get_logs(
-            {
-                "address": Web3.to_checksum_address(config.POOL_MANAGER),
-                "fromBlock": from_block,
-                "toBlock": current_block,
-                "topics": [self.swap_topic0, pool_id_topic],
-            }
-        )
+        try:
+            logs = self.w3.eth.get_logs(
+                {
+                    "address": Web3.to_checksum_address(config.POOL_MANAGER),
+                    "fromBlock": from_block,
+                    "toBlock": current_block,
+                    "topics": [self.swap_topic0, pool_id_topic],
+                }
+            )
+        except Exception as e:
+            # Some RPC providers intermittently reject the stricter topic query.
+            logger.warning("Swap log query failed, retrying with broader filter: %s", e)
+            logs = self.w3.eth.get_logs(
+                {
+                    "address": Web3.to_checksum_address(config.POOL_MANAGER),
+                    "fromBlock": max(self.last_swap_block + 1, current_block - 50),
+                    "toBlock": current_block,
+                    "topics": [self.swap_topic0],
+                }
+            )
 
         for raw_log in logs:
             ev = get_event_data(self.w3.codec, self.swap_event_abi, raw_log)
+            event_pool_id = ev["args"].get("id")
+            if event_pool_id is not None:
+                event_pool_id_hex = (
+                    event_pool_id.hex()
+                    if hasattr(event_pool_id, "hex")
+                    else str(event_pool_id)
+                )
+                if not event_pool_id_hex.startswith("0x"):
+                    event_pool_id_hex = "0x" + event_pool_id_hex
+                if event_pool_id_hex.lower() != config.POOL_ID.lower():
+                    continue
             key = (ev["transactionHash"].hex(), int(ev["logIndex"]))
             if key in self.swap_seen:
                 continue
