@@ -294,7 +294,7 @@ class LPAgent:
 
         liquidity_to_mint = self.DEFAULT_LIQUIDITY
         result = None
-        for _ in range(4):
+        for _ in range(12):
             try:
                 result = self.lp_manager.mint_position(
                     tick_lower=tick_lower,
@@ -690,7 +690,14 @@ class LPAgent:
 
     def run(self):
         """Main agent loop: read state -> decide -> execute -> sleep."""
-        self.setup()
+        try:
+            self.setup()
+        except Exception as e:
+            logger.error(
+                "Setup failed; continuing in monitor mode without active positions: %s",
+                e,
+                exc_info=True,
+            )
         logger.info(
             "Agent running. Checking every %ds. Press Ctrl+C to stop.",
             config.TRADE_INTERVAL,

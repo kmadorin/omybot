@@ -397,20 +397,43 @@ class LPManager:
     ) -> dict:
         """Encode unlockData, build tx, sign, send, and wait for receipt."""
         unlock_data = abi_encode(["bytes", "bytes[]"], [actions, params])
+
+        # Preflight simulation to avoid paying gas for obviously reverting txs.
+        try:
+            self.position_manager.functions.modifyLiquidities(unlock_data, deadline).call(
+                {
+                    "from": self.account.address,
+                    "value": value,
+                }
+            )
+        except Exception as e:
+            raise RuntimeError(f"modifyLiquidities simulation reverted: {e}") from e
+
         last_error = None
 
         for attempt in range(3):
             try:
+                base_tx = {
+                    "from": self.account.address,
+                    "nonce": self.w3.eth.get_transaction_count(
+                        self.account.address, "pending"
+                    ),
+                    "value": value,
+                }
+                try:
+                    gas_estimate = self.position_manager.functions.modifyLiquidities(
+                        unlock_data, deadline
+                    ).estimate_gas(base_tx)
+                    gas_limit = int(gas_estimate * 1.3)
+                except Exception:
+                    gas_limit = 2_000_000
+
                 tx = self.position_manager.functions.modifyLiquidities(
                     unlock_data, deadline
                 ).build_transaction(
                     {
-                        "from": self.account.address,
-                        "nonce": self.w3.eth.get_transaction_count(
-                            self.account.address, "pending"
-                        ),
-                        "value": value,
-                        "gas": 1_000_000,
+                        **base_tx,
+                        "gas": max(gas_limit, 1_200_000),
                         "gasPrice": int(self.w3.eth.gas_price * (1 + 0.15 * attempt)),
                     }
                 )
